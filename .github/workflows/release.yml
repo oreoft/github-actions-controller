@@ -1,0 +1,39 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*' # Trigger this workflow on tags starting with v (e.g., v0.1.0)
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create GitHub Releases
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Extract Version
+        id: properties
+        run: |
+          # Read the version property from gradle.properties
+          VERSION=$(grep '^version = ' gradle.properties | cut -d' ' -f3)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build Plugin
+        run: ./gradlew buildPlugin
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/distributions/github-actions-controller-${{ steps.properties.outputs.version }}.zip
+          generate_release_notes: true
