@@ -4,13 +4,74 @@
     <vendor>oreoft</vendor>
 
     <description><![CDATA[
-        在 IDE 的 Git 面板里直接触发和查看 GitHub Actions workflow。
+        <p>
+            View and trigger GitHub Actions workflows directly in the <b>Git panel</b> of JetBrains IDEs.<br/>
+            Uses IDEA's built-in GitHub account authentication — <b>no extra token configuration needed</b>.
+        </p>
+
+        <b>Features:</b>
+        <ul>
+            <li>Browse all workflows and their recent runs with status icons</li>
+            <li>Manually trigger <code>workflow_dispatch</code> events from within the IDE</li>
+            <li>Switch between multiple GitHub accounts with a toolbar dropdown</li>
+            <li>Double-click any run to open it in the browser</li>
+            <li>Auto-detects the GitHub remote of the current project (SSH &amp; HTTPS)</li>
+            <li>Supports localization — English and Simplified Chinese (简体中文)</li>
+        </ul>
+
+        <hr/>
+
+        <p>
+            在 JetBrains IDE 的 <b>Git 面板</b>中直接查看和触发 GitHub Actions Workflow。<br/>
+            复用 IDEA 内置的 GitHub 账号认证（Settings → Version Control → GitHub），<b>无需额外配置 Token</b>。
+        </p>
+
+        <b>功能：</b>
+        <ul>
+            <li>查看所有 Workflow 及近期运行记录，带状态图标</li>
+            <li>在 IDE 内手动触发 <code>workflow_dispatch</code> 事件</li>
+            <li>工具栏下拉框支持多账号切换</li>
+            <li>双击运行记录在浏览器中打开详情页</li>
+            <li>自动识别当前项目的 GitHub 远程仓库（SSH 和 HTTPS 均支持）</li>
+            <li>支持多语言 — 英文及简体中文</li>
+        </ul>
     ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>0.1.0 — Initial Release</h3>
+        <ul>
+            <li>Browse all GitHub Actions workflows in the Git panel</li>
+            <li>View recent runs with status icons (success / failure / in-progress / cancelled…)</li>
+            <li>Manually trigger <code>workflow_dispatch</code> events with branch selection</li>
+            <li>Multi-account support — switch between GitHub accounts via toolbar dropdown</li>
+            <li>Double-click any run to open it in the browser</li>
+            <li>Auto-detects GitHub remote (SSH &amp; HTTPS) from the current project</li>
+            <li>Uses IDEA's built-in GitHub authentication — no extra token setup required</li>
+            <li>Localization: English and Simplified Chinese (简体中文)</li>
+        </ul>
+
+        <hr/>
+
+        <h3>0.1.0 — 首次发布</h3>
+        <ul>
+            <li>在 Git 面板中浏览所有 GitHub Actions Workflow</li>
+            <li>查看近期运行记录，带状态图标（成功 / 失败 / 进行中 / 已取消…）</li>
+            <li>支持选择分支手动触发 <code>workflow_dispatch</code> 事件</li>
+            <li>多账号支持 — 工具栏下拉框一键切换 GitHub 账号</li>
+            <li>双击运行记录在浏览器中打开详情页</li>
+            <li>自动识别当前项目的 GitHub 远程仓库（SSH 和 HTTPS 均支持）</li>
+            <li>复用 IDEA 内置 GitHub 认证，无需额外配置 Token</li>
+            <li>多语言支持：英文 / 简体中文</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>Git4Idea</depends>
+    <!-- 复用 IDEA 内置 GitHub 账号认证 -->
+    <depends>org.jetbrains.plugins.github</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <!-- Git 面板 "GitHub Actions" Tab -->
         <changesViewContent tabName="GitHub Actions"
                              className="com.oreoft.githubactions.ActionsTabContentProvider"/>
     </extensions>
