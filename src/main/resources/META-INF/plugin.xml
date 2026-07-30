@@ -1,0 +1,17 @@
+<idea-plugin>
+    <id>com.oreoft.githubactionscontroller</id>
+    <name>GitHub Actions Controller</name>
+    <vendor>oreoft</vendor>
+
+    <description><![CDATA[
+        在 IDE 的 Git 面板里直接触发和查看 GitHub Actions workflow。
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <changesViewContent tabName="GitHub Actions"
+                             className="com.oreoft.githubactions.ActionsTabContentProvider"/>
+    </extensions>
+</idea-plugin>
