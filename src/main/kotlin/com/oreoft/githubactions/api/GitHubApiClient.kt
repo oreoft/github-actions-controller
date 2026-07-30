@@ -14,10 +14,17 @@ import java.time.Duration
  * [httpClient] 是 companion object 级别的单例，整个插件生命周期共享一个连接池，
  * 避免每次请求都新建重量级对象。
  */
-class GitHubApiClient(private val token: String) {
+class GitHubApiClient(private val token: String, host: String = "github.com") {
+
+    /**
+     * github.com 走公共 REST API；GitHub Enterprise Server 走各自域名下的 /api/v3。
+     * 参考：https://docs.github.com/en/enterprise-server/rest/quickstart
+     */
+    private val baseUrl: String =
+        if (host.equals("github.com", ignoreCase = true)) "https://api.github.com"
+        else "https://$host/api/v3"
 
     private companion object {
-        const val BASE_URL = "https://api.github.com"
         const val API_VERSION = "2022-11-28"
 
         /** 共享单例 HttpClient，线程安全，内置连接池 */
@@ -42,11 +49,15 @@ class GitHubApiClient(private val token: String) {
 
     /**
      * 列出指定 workflow 的运行记录。
+     * [RunsPage.hasMore] 基于响应里真实的 total_count 计算，而不是猜测"本页是否凑满了 perPage"——
+     * 后者在 total 恰好是 perPage 整数倍时会多出一次点了也没有结果的空翻页。
      * @throws GitHubApiException 当 API 返回非 2xx 响应时
      */
-    fun listWorkflowRuns(owner: String, repo: String, workflowId: Long, page: Int = 1, perPage: Int = 20): List<GitHubWorkflowRun> {
+    fun listWorkflowRuns(owner: String, repo: String, workflowId: Long, page: Int = 1, perPage: Int = 20): RunsPage {
         val body = get("/repos/$owner/$repo/actions/workflows/$workflowId/runs?page=$page&per_page=$perPage")
-        return json.decodeFromString<WorkflowRunsResponse>(body).workflowRuns
+        val response = json.decodeFromString<WorkflowRunsResponse>(body)
+        val hasMore = page.toLong() * perPage < response.totalCount
+        return RunsPage(response.workflowRuns, hasMore)
     }
 
     /**
@@ -97,7 +108,7 @@ class GitHubApiClient(private val token: String) {
 
     private fun buildRequest(path: String): HttpRequest.Builder =
         HttpRequest.newBuilder()
-            .uri(URI.create("$BASE_URL$path"))
+            .uri(URI.create("$baseUrl$path"))
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION)
@@ -106,14 +117,38 @@ class GitHubApiClient(private val token: String) {
     private fun send(request: HttpRequest): String {
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() !in 200..299) {
-            val detail = response.body().take(300)
-            throw GitHubApiException(
-                "GitHub API ${response.statusCode()} for ${request.uri().path}: $detail"
-            )
+            throw toApiException(response)
         }
         return response.body()
     }
+
+    private fun toApiException(response: HttpResponse<String>): GitHubApiException {
+        val statusCode = response.statusCode()
+        val githubMessage = extractMessage(response.body()) ?: response.body().take(300)
+        val rateLimitResetEpochSeconds =
+            if (statusCode == 403 && response.headers().firstValue("X-RateLimit-Remaining").orElse(null) == "0") {
+                response.headers().firstValue("X-RateLimit-Reset").orElse(null)?.toLongOrNull()
+            } else null
+        return GitHubApiException(statusCode, githubMessage, rateLimitResetEpochSeconds)
+    }
+
+    /** 尝试从 GitHub 错误响应体里取出 message 字段；解析失败（比如网关返回了 HTML）就返回 null，交给调用方兜底 */
+    private fun extractMessage(body: String): String? =
+        try {
+            json.decodeFromString<GitHubErrorResponse>(body).message
+        } catch (e: Exception) {
+            null
+        }
 }
 
-/** GitHub API 返回非 2xx 时抛出的异常 */
-class GitHubApiException(message: String) : Exception(message)
+/**
+ * GitHub API 返回非 2xx 时抛出的异常。
+ * @param statusCode HTTP 状态码
+ * @param githubMessage GitHub 返回体里的 message 字段；解析不出时退化为截断后的原始 body
+ * @param rateLimitResetEpochSeconds 仅当命中限流（403 且 X-RateLimit-Remaining: 0）时有值，是恢复时间的 epoch 秒
+ */
+class GitHubApiException(
+    val statusCode: Int,
+    val githubMessage: String,
+    val rateLimitResetEpochSeconds: Long? = null
+) : Exception("GitHub API $statusCode: $githubMessage")

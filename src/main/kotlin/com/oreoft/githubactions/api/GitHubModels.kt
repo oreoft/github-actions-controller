@@ -61,6 +61,15 @@ data class TriggerRequest(
     val ref: String
 )
 
+/** GitHub 错误响应体，只取我们关心的 message 字段，其余字段靠 ignoreUnknownKeys 忽略 */
+@Serializable
+data class GitHubErrorResponse(
+    val message: String? = null
+)
+
+/** 一页 workflow runs，以及依据响应里真实的 total_count 算出的"是否还有下一页" */
+data class RunsPage(val runs: List<GitHubWorkflowRun>, val hasMore: Boolean)
+
 @Serializable
 data class GitHubJob(
     val id: Long,
