@@ -16,6 +16,7 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.oreoft.githubactions.GitHubActionsBundle.message
 import com.oreoft.githubactions.api.GitHubApiClient
+import com.oreoft.githubactions.api.GitHubApiException
 import com.oreoft.githubactions.api.GitHubWorkflow
 import com.oreoft.githubactions.api.GitHubWorkflowRun
 import com.oreoft.githubactions.api.OwnerRepo
@@ -35,6 +36,26 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.swing.*
+
+private val rateLimitResetFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
+
+/**
+ * 把异常转成给用户看的本地化错误文案。
+ * 对 [GitHubApiException] 按状态码区分 401/403(含限流)/404，其余异常（网络超时等）退化为通用错误文案。
+ */
+private fun describeApiError(ex: Exception): String {
+    val apiEx = ex as? GitHubApiException ?: return message("status.error", ex.message ?: "")
+    val resetEpochSeconds = apiEx.rateLimitResetEpochSeconds
+    return when {
+        resetEpochSeconds != null ->
+            message("status.error.ratelimit", rateLimitResetFormatter.format(Instant.ofEpochSecond(resetEpochSeconds)))
+
+        apiEx.statusCode == 401 -> message("status.error.unauthorized")
+        apiEx.statusCode == 403 -> message("status.error.forbidden", apiEx.githubMessage)
+        apiEx.statusCode == 404 -> message("status.error.notfound")
+        else -> message("status.error", apiEx.githubMessage)
+    }
+}
 
 /**
  * GitHub Actions 主面板。
@@ -69,6 +90,13 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var currentRunPage = 1
     private var hasMoreRuns = false
     private var isLoadingRuns = false
+
+    /**
+     * 每发起一次 runs 请求（初次加载/加载更多）就自增。
+     * 响应回到 EDT 时校验自己的编号是否还是最新的，
+     * 防止“先选 A 后选 B，A 的响应却比 B 晚回来把 B 的结果覆盖掉”的竞态。
+     */
+    private var runRequestGeneration = 0
     
     // ─── Right Pane Card Layout ───────────────────────────────────────────────
     private val rightCardLayout = CardLayout()
@@ -276,7 +304,8 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 return@runInBackground
             }
             try {
-                val workflows = GitHubApiClient(token).listWorkflows(ownerRepoLocal.owner, ownerRepoLocal.repo)
+                val workflows =
+                    GitHubApiClient(token, ownerRepoLocal.host).listWorkflows(ownerRepoLocal.owner, ownerRepoLocal.repo)
                 onEdt {
                     workflowModel.clear()
                     workflows.forEach { workflowModel.addElement(it) }
@@ -286,13 +315,13 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                 }
             } catch (ex: Exception) {
-                onEdt { setStatus(message("status.error", ex.message ?: "")) }
+                onEdt { setStatus(describeApiError(ex)) }
             }
         }
     }
 
     private fun loadRuns(workflow: GitHubWorkflow) {
-        val (owner, repo) = ownerRepo ?: return
+        val (owner, repo, host) = ownerRepo ?: return
         val account = currentAccount ?: return
 
         runModel.clear()
@@ -300,68 +329,76 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
         hasMoreRuns = false
         isLoadingRuns = true
         setStatus(message("status.runs.loading", workflow.name))
+        val requestGen = ++runRequestGeneration
 
         runInBackground {
             val token = GitHubAuthService.getToken(account) ?: run {
                 onEdt {
+                    if (requestGen != runRequestGeneration) return@onEdt
                     isLoadingRuns = false
-                    setStatus(message("status.token.expired")) 
+                    setStatus(message("status.token.expired"))
                 }
                 return@runInBackground
             }
             try {
-                val runs = GitHubApiClient(token).listWorkflowRuns(owner, repo, workflow.id, currentRunPage, 20)
-                hasMoreRuns = runs.size >= 20
+                val page = GitHubApiClient(token, host).listWorkflowRuns(owner, repo, workflow.id, currentRunPage, 20)
                 onEdt {
+                    // 这段响应对应的选择已经过期(用户切到别的 workflow 了)，丢弃，不能覆盖当前展示的内容
+                    if (requestGen != runRequestGeneration) return@onEdt
+                    hasMoreRuns = page.hasMore
                     runModel.clear()
-                    runs.forEach { runModel.addElement(it) }
+                    page.runs.forEach { runModel.addElement(it) }
                     if (hasMoreRuns) {
                         runModel.addElement(createLoadMoreDummyItem())
                     }
                     setStatus(
-                        if (runs.isEmpty()) message("status.runs.empty", workflow.name)
-                        else message("status.runs.loaded", runs.size, workflow.name)
+                        if (page.runs.isEmpty()) message("status.runs.empty", workflow.name)
+                        else message("status.runs.loaded", page.runs.size, workflow.name)
                     )
                     rightCardLayout.show(rightCardPanel, "RunsList")
                     isLoadingRuns = false
                 }
             } catch (ex: Exception) {
-                onEdt { 
+                onEdt {
+                    if (requestGen != runRequestGeneration) return@onEdt
                     isLoadingRuns = false
-                    setStatus(message("status.error", ex.message ?: "")) 
+                    setStatus(describeApiError(ex))
                 }
             }
         }
     }
-    
+
     private fun loadMoreRuns() {
         val workflow = selectedWorkflow ?: return
-        val (owner, repo) = ownerRepo ?: return
+        val (owner, repo, host) = ownerRepo ?: return
         val account = currentAccount ?: return
 
         isLoadingRuns = true
         currentRunPage++
-        
+        val requestGen = ++runRequestGeneration
+
         // Remove the dummy item while loading
         if (runModel.size() > 0 && runModel.lastElement().id == -1L) {
             runModel.removeElementAt(runModel.size() - 1)
         }
-        
+
         setStatus(message("status.runs.loading", workflow.name))
 
         runInBackground {
             val token = GitHubAuthService.getToken(account) ?: run {
                 onEdt {
+                    if (requestGen != runRequestGeneration) return@onEdt
                     isLoadingRuns = false
-                    setStatus(message("status.token.expired")) 
+                    setStatus(message("status.token.expired"))
                 }
                 return@runInBackground
             }
             try {
-                val runs = GitHubApiClient(token).listWorkflowRuns(owner, repo, workflow.id, currentRunPage, 20)
-                hasMoreRuns = runs.size >= 20
+                val page = GitHubApiClient(token, host).listWorkflowRuns(owner, repo, workflow.id, currentRunPage, 20)
                 onEdt {
-                    runs.forEach { runModel.addElement(it) }
+                    if (requestGen != runRequestGeneration) return@onEdt
+                    hasMoreRuns = page.hasMore
+                    page.runs.forEach { runModel.addElement(it) }
                     if (hasMoreRuns) {
                         runModel.addElement(createLoadMoreDummyItem())
                     }
@@ -369,15 +406,16 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     isLoadingRuns = false
                 }
             } catch (ex: Exception) {
-                onEdt { 
+                onEdt {
+                    if (requestGen != runRequestGeneration) return@onEdt
                     isLoadingRuns = false
                     currentRunPage-- // revert page bump
-                    setStatus(message("status.error", ex.message ?: "")) 
+                    setStatus(describeApiError(ex))
                 }
             }
         }
     }
-    
+
     private fun createLoadMoreDummyItem() = GitHubWorkflowRun(
         id = -1L,
         status = "load_more",
@@ -391,7 +429,7 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun triggerWorkflow() {
         val wf = selectedWorkflow ?: return
-        val (owner, repo) = ownerRepo ?: return
+        val (owner, repo, host) = ownerRepo ?: return
         val account = currentAccount ?: return
 
         val defaultBranch = GitRepoDetector.detectCurrentBranch(project) ?: message("dialog.trigger.default.branch")
@@ -413,7 +451,7 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 return@runInBackground
             }
             try {
-                GitHubApiClient(token).triggerWorkflow(owner, repo, wf.id, branch)
+                GitHubApiClient(token, host).triggerWorkflow(owner, repo, wf.id, branch)
                 onEdt {
                     setStatus(message("status.trigger.success", wf.name, branch))
                     Timer(2000) { loadRuns(wf) }.apply { isRepeats = false; start() }
@@ -423,7 +461,7 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     setStatus(message("status.trigger.failed"))
                     Messages.showErrorDialog(
                         project,
-                        ex.message ?: "",
+                        describeApiError(ex),
                         message("dialog.trigger.error.title")
                     )
                 }
@@ -587,9 +625,16 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
         
         showLoading()
         AppExecutorUtil.getAppExecutorService().submit {
-            val token = GitHubAuthService.getToken(account) ?: return@submit
+            val token = GitHubAuthService.getToken(account) ?: run {
+                SwingUtilities.invokeLater {
+                    logTextArea.text = message("status.token.expired")
+                    hideLoading()
+                }
+                return@submit
+            }
             try {
-                val jobs = GitHubApiClient(token).listWorkflowJobs(ownerRepo.owner, ownerRepo.repo, run.id)
+                val jobs =
+                    GitHubApiClient(token, ownerRepo.host).listWorkflowJobs(ownerRepo.owner, ownerRepo.repo, run.id)
                 SwingUtilities.invokeLater {
                     jobModel.clear()
                     jobs.forEach { jobModel.addElement(it) }
@@ -600,14 +645,14 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
                     hideLoading()
                 }
             } catch (ex: Exception) {
-                SwingUtilities.invokeLater { 
-                    logTextArea.text = message("status.error", ex.message ?: "")
+                SwingUtilities.invokeLater {
+                    logTextArea.text = describeApiError(ex)
                     hideLoading()
                 }
             }
         }
     }
-    
+
     private fun loadJobLog(job: GitHubJob) {
         logTextArea.text = message("status.logs.loading")
         val ownerRepo = currentOwnerRepo ?: return
@@ -615,20 +660,26 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
         
         showLoading()
         AppExecutorUtil.getAppExecutorService().submit {
-            val token = GitHubAuthService.getToken(account) ?: return@submit
+            val token = GitHubAuthService.getToken(account) ?: run {
+                SwingUtilities.invokeLater {
+                    logTextArea.text = message("status.token.expired")
+                    hideLoading()
+                }
+                return@submit
+            }
             try {
-                val logText = GitHubApiClient(token).getJobLog(ownerRepo.owner, ownerRepo.repo, job.id)
+                val logText = GitHubApiClient(token, ownerRepo.host).getJobLog(ownerRepo.owner, ownerRepo.repo, job.id)
                 SwingUtilities.invokeLater {
                     logTextArea.text = logText
                     logTextArea.caretPosition = 0
                     hideLoading()
                 }
             } catch (ex: Exception) {
-                SwingUtilities.invokeLater { 
-                    if (ex.message?.contains("BlobNotFound") == true || ex.message?.contains("404") == true) {
-                        logTextArea.text = message("status.logs.not.found")
+                SwingUtilities.invokeLater {
+                    logTextArea.text = if (ex is GitHubApiException && ex.statusCode == 404) {
+                        message("status.logs.not.found")
                     } else {
-                        logTextArea.text = message("status.error", ex.message ?: "") 
+                        describeApiError(ex)
                     }
                     hideLoading()
                 }
