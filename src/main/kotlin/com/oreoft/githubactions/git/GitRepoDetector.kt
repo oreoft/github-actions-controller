@@ -46,6 +46,17 @@ object GitRepoDetector {
         return null
     }
 
+    /**
+     * 获取当前 Git 分支名称
+     */
+    fun detectCurrentBranch(project: Project): String? {
+        val manager = GitRepositoryManager.getInstance(project)
+        for (gitRepo in manager.repositories) {
+            gitRepo.currentBranch?.name?.let { return it }
+        }
+        return null
+    }
+
     private fun parseOwnerRepo(url: String): OwnerRepo? {
         SSH_PATTERN.find(url)?.let { m ->
             return OwnerRepo(owner = m.groupValues[2], repo = m.groupValues[3], host = m.groupValues[1])

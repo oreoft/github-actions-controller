@@ -394,12 +394,13 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val (owner, repo) = ownerRepo ?: return
         val account = currentAccount ?: return
 
+        val defaultBranch = GitRepoDetector.detectCurrentBranch(project) ?: message("dialog.trigger.default.branch")
         val branch = Messages.showInputDialog(
             project,
             message("dialog.trigger.message"),
             message("dialog.trigger.title", wf.name),
             AllIcons.Actions.Execute,
-            message("dialog.trigger.default.branch"),
+            defaultBranch,
             null
         ) ?: return
         if (branch.isBlank()) return
@@ -624,7 +625,11 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
                 }
             } catch (ex: Exception) {
                 SwingUtilities.invokeLater { 
-                    logTextArea.text = message("status.error", ex.message ?: "") 
+                    if (ex.message?.contains("BlobNotFound") == true || ex.message?.contains("404") == true) {
+                        logTextArea.text = message("status.logs.not.found")
+                    } else {
+                        logTextArea.text = message("status.error", ex.message ?: "") 
+                    }
                     hideLoading()
                 }
             }

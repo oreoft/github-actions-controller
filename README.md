@@ -8,8 +8,9 @@ A JetBrains IDE plugin that seamlessly integrates GitHub Actions into your Git w
 
 - **Integrated Git Panel**: A dedicated "GitHub Actions" tab inside the IDE's standard Git ToolWindow.
 - **Workflow & Run Browser**: View all workflows and their recent runs, complete with real-time status icons (success, failure, in-progress, etc.).
+- **In-IDE Log Viewer**: Double-click on any run to inspect its Job execution details and logs without leaving the IDE.
 - **Zero Configuration**: Uses the built-in IntelliJ GitHub account manager (`Settings` → `Version Control` → `GitHub`). No need to manually copy-paste Personal Access Tokens (PAT).
-- **Trigger Workflows**: Manually dispatch `workflow_dispatch` events directly from the UI, with branch selection.
+- **Trigger Workflows**: Manually dispatch `workflow_dispatch` events directly from the UI. Automatically detects the current Git branch.
 - **Multi-Account & Enterprise Support**: Easily switch between multiple logged-in GitHub accounts. Automatically detects GitHub Enterprise remotes.
 - **Bilingual Support**: Fully localized in English and Simplified Chinese (简体中文).
 
