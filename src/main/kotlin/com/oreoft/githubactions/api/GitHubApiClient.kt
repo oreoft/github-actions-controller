@@ -10,18 +10,22 @@ import java.time.Duration
 /**
  * 轻量 GitHub REST API 客户端，基于 Java 17 内置 HttpClient。
  * 不依赖任何外部 HTTP 库，避免和 IntelliJ 平台产生类加载冲突。
+ *
+ * [httpClient] 是 companion object 级别的单例，整个插件生命周期共享一个连接池，
+ * 避免每次请求都新建重量级对象。
  */
 class GitHubApiClient(private val token: String) {
-
-    private val httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(15))
-        .build()
-
-    private val json = Json { ignoreUnknownKeys = true }
 
     private companion object {
         const val BASE_URL = "https://api.github.com"
         const val API_VERSION = "2022-11-28"
+
+        /** 共享单例 HttpClient，线程安全，内置连接池 */
+        val httpClient: HttpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(15))
+            .build()
+
+        val json = Json { ignoreUnknownKeys = true }
     }
 
     // ─── Public API ────────────────────────────────────────────────────────────
@@ -50,7 +54,11 @@ class GitHubApiClient(private val token: String) {
      * @throws GitHubApiException 当 API 返回非 2xx 响应时
      */
     fun triggerWorkflow(owner: String, repo: String, workflowId: Long, branch: String) {
-        val body = """{"ref":"${branch.trim()}"}"""
+        // 用 Json 序列化确保 branch 中的特殊字符（引号、反斜杠等）被正确转义
+        val body = json.encodeToString(
+            TriggerRequest.serializer(),
+            TriggerRequest(ref = branch.trim())
+        )
         post("/repos/$owner/$repo/actions/workflows/$workflowId/dispatches", body)
     }
 
@@ -80,7 +88,7 @@ class GitHubApiClient(private val token: String) {
     private fun send(request: HttpRequest): String {
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() !in 200..299) {
-            val detail = response.body().take(200)
+            val detail = response.body().take(300)
             throw GitHubApiException(
                 "GitHub API ${response.statusCode()} for ${request.uri().path}: $detail"
             )

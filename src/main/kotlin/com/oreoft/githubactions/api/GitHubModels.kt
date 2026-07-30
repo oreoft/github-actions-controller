@@ -50,6 +50,11 @@ data class HeadCommit(
     val message: String = ""
 )
 
+@Serializable
+data class TriggerRequest(
+    val ref: String
+)
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 /** 解析 GitHub remote URL 后的 owner / repo 对 */
