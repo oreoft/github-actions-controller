@@ -23,6 +23,7 @@ class GitHubApiClient(private val token: String) {
         /** 共享单例 HttpClient，线程安全，内置连接池 */
         val httpClient: HttpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
+            .followRedirects(HttpClient.Redirect.NORMAL)
             .build()
 
         val json = Json { ignoreUnknownKeys = true }
@@ -40,12 +41,29 @@ class GitHubApiClient(private val token: String) {
     }
 
     /**
-     * 列出指定 workflow 的最近运行记录（最多 10 条）。
+     * 列出指定 workflow 的运行记录。
      * @throws GitHubApiException 当 API 返回非 2xx 响应时
      */
-    fun listWorkflowRuns(owner: String, repo: String, workflowId: Long): List<GitHubWorkflowRun> {
-        val body = get("/repos/$owner/$repo/actions/workflows/$workflowId/runs?per_page=10")
+    fun listWorkflowRuns(owner: String, repo: String, workflowId: Long, page: Int = 1, perPage: Int = 20): List<GitHubWorkflowRun> {
+        val body = get("/repos/$owner/$repo/actions/workflows/$workflowId/runs?page=$page&per_page=$perPage")
         return json.decodeFromString<WorkflowRunsResponse>(body).workflowRuns
+    }
+
+    /**
+     * 列出指定 run 的所有 job。
+     * @throws GitHubApiException 当 API 返回非 2xx 响应时
+     */
+    fun listWorkflowJobs(owner: String, repo: String, runId: Long): List<GitHubJob> {
+        val body = get("/repos/$owner/$repo/actions/runs/$runId/jobs")
+        return json.decodeFromString<JobsResponse>(body).jobs
+    }
+
+    /**
+     * 获取指定 job 的原始日志文本。
+     * @throws GitHubApiException 当 API 返回非 2xx 响应时
+     */
+    fun getJobLog(owner: String, repo: String, jobId: Long): String {
+        return get("/repos/$owner/$repo/actions/jobs/$jobId/logs")
     }
 
     /**

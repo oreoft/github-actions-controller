@@ -17,6 +17,12 @@ data class WorkflowRunsResponse(
     @SerialName("workflow_runs") val workflowRuns: List<GitHubWorkflowRun>
 )
 
+@Serializable
+data class JobsResponse(
+    @SerialName("total_count") val totalCount: Int,
+    val jobs: List<GitHubJob>
+)
+
 // ─── Domain models ────────────────────────────────────────────────────────────
 
 @Serializable
@@ -53,6 +59,17 @@ data class HeadCommit(
 @Serializable
 data class TriggerRequest(
     val ref: String
+)
+
+@Serializable
+data class GitHubJob(
+    val id: Long,
+    val name: String,
+    /** "queued" | "in_progress" | "completed" | "waiting" */
+    val status: String,
+    /** "success" | "failure" | "cancelled" | "skipped" | null */
+    val conclusion: String? = null,
+    @SerialName("html_url") val htmlUrl: String? = null
 )
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────

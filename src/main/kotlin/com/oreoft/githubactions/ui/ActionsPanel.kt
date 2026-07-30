@@ -19,10 +19,14 @@ import com.oreoft.githubactions.api.GitHubApiClient
 import com.oreoft.githubactions.api.GitHubWorkflow
 import com.oreoft.githubactions.api.GitHubWorkflowRun
 import com.oreoft.githubactions.api.OwnerRepo
+import com.oreoft.githubactions.api.GitHubJob
 import com.oreoft.githubactions.auth.GitHubAuthService
 import com.oreoft.githubactions.git.GitRepoDetector
 import org.jetbrains.plugins.github.authentication.accounts.GithubAccount
+import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.util.ui.AsyncProcessIcon
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Font
 import java.awt.event.MouseAdapter
@@ -61,6 +65,16 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var ownerRepo: OwnerRepo? = null
     private var selectedWorkflow: GitHubWorkflow? = null
     private var currentAccount: GithubAccount? = null
+    
+    private var currentRunPage = 1
+    private var hasMoreRuns = false
+    private var isLoadingRuns = false
+    
+    // ─── Right Pane Card Layout ───────────────────────────────────────────────
+    private val rightCardLayout = CardLayout()
+    private val rightCardPanel = JPanel(rightCardLayout)
+    
+    private val jobDetailsPanel = JobDetailsPanel()
 
     init {
         setupUI()
@@ -85,15 +99,35 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         runList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
+                val run = runList.selectedValue ?: return
+                
+                // If it's the "Load More" dummy item
+                if (run.id == -1L) {
+                    if (e.button == MouseEvent.BUTTON1 && !isLoadingRuns) {
+                        loadMoreRuns()
+                    }
+                    return
+                }
+
                 if (e.clickCount == 2) {
-                    runList.selectedValue?.let { BrowserUtil.browse(it.htmlUrl) }
+                    val or = ownerRepo
+                    val acc = currentAccount
+                    if (or != null && acc != null) {
+                        // Switch to Job Details View
+                        jobDetailsPanel.loadJobsForRun(run, or, acc)
+                        rightCardLayout.show(rightCardPanel, "JobDetails")
+                    }
                 }
             }
         })
+        
+        val runsPane = buildTitledPane(message("panel.runs.title"), runList)
+        rightCardPanel.add(runsPane, "RunsList")
+        rightCardPanel.add(jobDetailsPanel, "JobDetails")
 
         val splitter = OnePixelSplitter(false, 0.35f).apply {
             firstComponent = buildTitledPane(message("panel.workflows.title"), workflowList)
-            secondComponent = buildTitledPane(message("panel.runs.title"), runList)
+            secondComponent = rightCardPanel
         }
         add(splitter, BorderLayout.CENTER)
 
@@ -262,28 +296,96 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val account = currentAccount ?: return
 
         runModel.clear()
+        currentRunPage = 1
+        hasMoreRuns = false
+        isLoadingRuns = true
         setStatus(message("status.runs.loading", workflow.name))
 
         runInBackground {
             val token = GitHubAuthService.getToken(account) ?: run {
-                onEdt { setStatus(message("status.token.expired")) }
+                onEdt {
+                    isLoadingRuns = false
+                    setStatus(message("status.token.expired")) 
+                }
                 return@runInBackground
             }
             try {
-                val runs = GitHubApiClient(token).listWorkflowRuns(owner, repo, workflow.id)
+                val runs = GitHubApiClient(token).listWorkflowRuns(owner, repo, workflow.id, currentRunPage, 20)
+                hasMoreRuns = runs.size >= 20
                 onEdt {
                     runModel.clear()
                     runs.forEach { runModel.addElement(it) }
+                    if (hasMoreRuns) {
+                        runModel.addElement(createLoadMoreDummyItem())
+                    }
                     setStatus(
                         if (runs.isEmpty()) message("status.runs.empty", workflow.name)
                         else message("status.runs.loaded", runs.size, workflow.name)
                     )
+                    rightCardLayout.show(rightCardPanel, "RunsList")
+                    isLoadingRuns = false
                 }
             } catch (ex: Exception) {
-                onEdt { setStatus(message("status.error", ex.message ?: "")) }
+                onEdt { 
+                    isLoadingRuns = false
+                    setStatus(message("status.error", ex.message ?: "")) 
+                }
             }
         }
     }
+    
+    private fun loadMoreRuns() {
+        val workflow = selectedWorkflow ?: return
+        val (owner, repo) = ownerRepo ?: return
+        val account = currentAccount ?: return
+
+        isLoadingRuns = true
+        currentRunPage++
+        
+        // Remove the dummy item while loading
+        if (runModel.size() > 0 && runModel.lastElement().id == -1L) {
+            runModel.removeElementAt(runModel.size() - 1)
+        }
+        
+        setStatus(message("status.runs.loading", workflow.name))
+
+        runInBackground {
+            val token = GitHubAuthService.getToken(account) ?: run {
+                onEdt {
+                    isLoadingRuns = false
+                    setStatus(message("status.token.expired")) 
+                }
+                return@runInBackground
+            }
+            try {
+                val runs = GitHubApiClient(token).listWorkflowRuns(owner, repo, workflow.id, currentRunPage, 20)
+                hasMoreRuns = runs.size >= 20
+                onEdt {
+                    runs.forEach { runModel.addElement(it) }
+                    if (hasMoreRuns) {
+                        runModel.addElement(createLoadMoreDummyItem())
+                    }
+                    setStatus(message("status.runs.loaded", runModel.size() - if(hasMoreRuns) 1 else 0, workflow.name))
+                    isLoadingRuns = false
+                }
+            } catch (ex: Exception) {
+                onEdt { 
+                    isLoadingRuns = false
+                    currentRunPage-- // revert page bump
+                    setStatus(message("status.error", ex.message ?: "")) 
+                }
+            }
+        }
+    }
+    
+    private fun createLoadMoreDummyItem() = GitHubWorkflowRun(
+        id = -1L,
+        status = "load_more",
+        headBranch = "",
+        createdAt = "",
+        runNumber = 0,
+        htmlUrl = ""
+    )
 
     // ─── Actions ───────────────────────────────────────────────────────────────
 
@@ -370,6 +472,15 @@ class RunCellRenderer : DefaultListCellRenderer() {
         val label = super.getListCellRendererComponent(
             list, text, index, isSelected, cellHasFocus
         ) as JLabel
+        
+        if (run?.id == -1L) {
+            label.text = "  ${message("action.load.more")}"
+            label.icon = null
+            label.font = label.font.deriveFont(Font.ITALIC)
+            label.foreground = UIUtil.getInactiveTextColor()
+            return label
+        }
+        
         label.border = JBUI.Borders.empty(5, 8)
         label.icon = runStatusIcon(run)
         label.toolTipText = run?.let {
@@ -388,5 +499,170 @@ class RunCellRenderer : DefaultListCellRenderer() {
         run.conclusion == "skipped" -> AllIcons.RunConfigurations.TestSkipped
         run.conclusion == "action_required" -> AllIcons.General.BalloonWarning
         else -> AllIcons.RunConfigurations.TestIgnored
+    }
+}
+
+// ─── Job Details Panel ────────────────────────────────────────────────────────
+
+class JobDetailsPanel : JPanel(BorderLayout()) {
+    
+    private val jobModel = DefaultListModel<GitHubJob>()
+    private val jobList = JBList(jobModel).apply {
+        cellRenderer = JobCellRenderer()
+        selectionMode = ListSelectionModel.SINGLE_SELECTION
+    }
+    private val logTextArea = JTextArea().apply {
+        isEditable = false
+        val globalScheme = EditorColorsManager.getInstance().globalScheme
+        font = Font(globalScheme.editorFontName, Font.PLAIN, globalScheme.editorFontSize)
+        background = globalScheme.defaultBackground
+        foreground = globalScheme.defaultForeground
+        margin = JBUI.insets(5)
+    }
+    private val headerLabel = JBLabel("").apply {
+        font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
+        border = JBUI.Borders.empty(0, 10, 0, 0)
+    }
+    private val loadingIcon = AsyncProcessIcon("LoadingJobLogs").apply {
+        isVisible = false
+        border = JBUI.Borders.empty(0, 10, 0, 10)
+    }
+    
+    private var currentRun: GitHubWorkflowRun? = null
+    private var currentOwnerRepo: OwnerRepo? = null
+    private var currentAccount: GithubAccount? = null
+
+    init {
+        val backAction = object : AnAction(message("action.back.to.runs"), "", AllIcons.Actions.Back) {
+            override fun actionPerformed(e: AnActionEvent) {
+                val parentCard = this@JobDetailsPanel.parent
+                if (parentCard?.layout is CardLayout) {
+                    (parentCard.layout as CardLayout).show(parentCard, "RunsList")
+                }
+            }
+        }
+        val toolbar = ActionManager.getInstance().createActionToolbar("JobDetailsToolbar", DefaultActionGroup(backAction), true).apply {
+            targetComponent = this@JobDetailsPanel
+        }
+        
+        val headerPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.customLineBottom(JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground())
+            add(toolbar.component, BorderLayout.WEST)
+            
+            val centerPanel = JPanel(BorderLayout()).apply {
+                add(headerLabel, BorderLayout.WEST)
+                add(loadingIcon, BorderLayout.EAST)
+            }
+            add(centerPanel, BorderLayout.CENTER)
+        }
+        
+        val splitter = OnePixelSplitter(true, 0.3f).apply {
+            firstComponent = JBScrollPane(jobList).apply {
+                border = JBUI.Borders.empty()
+            }
+            secondComponent = JBScrollPane(logTextArea).apply {
+                border = JBUI.Borders.empty()
+            }
+        }
+        
+        add(headerPanel, BorderLayout.NORTH)
+        add(splitter, BorderLayout.CENTER)
+        
+        jobList.addListSelectionListener { e ->
+            if (!e.valueIsAdjusting) {
+                jobList.selectedValue?.let { loadJobLog(it) }
+            }
+        }
+    }
+
+    fun loadJobsForRun(run: GitHubWorkflowRun, ownerRepo: OwnerRepo, account: GithubAccount) {
+        currentRun = run
+        currentOwnerRepo = ownerRepo
+        currentAccount = account
+        
+        headerLabel.text = "#${run.runNumber} [${run.headBranch}]"
+        jobModel.clear()
+        logTextArea.text = message("status.jobs.loading")
+        
+        showLoading()
+        AppExecutorUtil.getAppExecutorService().submit {
+            val token = GitHubAuthService.getToken(account) ?: return@submit
+            try {
+                val jobs = GitHubApiClient(token).listWorkflowJobs(ownerRepo.owner, ownerRepo.repo, run.id)
+                SwingUtilities.invokeLater {
+                    jobModel.clear()
+                    jobs.forEach { jobModel.addElement(it) }
+                    logTextArea.text = ""
+                    if (jobs.isNotEmpty()) {
+                        jobList.selectedIndex = 0
+                    }
+                    hideLoading()
+                }
+            } catch (ex: Exception) {
+                SwingUtilities.invokeLater { 
+                    logTextArea.text = message("status.error", ex.message ?: "")
+                    hideLoading()
+                }
+            }
+        }
+    }
+    
+    private fun loadJobLog(job: GitHubJob) {
+        logTextArea.text = message("status.logs.loading")
+        val ownerRepo = currentOwnerRepo ?: return
+        val account = currentAccount ?: return
+        
+        showLoading()
+        AppExecutorUtil.getAppExecutorService().submit {
+            val token = GitHubAuthService.getToken(account) ?: return@submit
+            try {
+                val logText = GitHubApiClient(token).getJobLog(ownerRepo.owner, ownerRepo.repo, job.id)
+                SwingUtilities.invokeLater {
+                    logTextArea.text = logText
+                    logTextArea.caretPosition = 0
+                    hideLoading()
+                }
+            } catch (ex: Exception) {
+                SwingUtilities.invokeLater { 
+                    logTextArea.text = message("status.error", ex.message ?: "") 
+                    hideLoading()
+                }
+            }
+        }
+    }
+
+    private fun showLoading() {
+        loadingIcon.resume()
+        loadingIcon.isVisible = true
+    }
+
+    private fun hideLoading() {
+        loadingIcon.suspend()
+        loadingIcon.isVisible = false
+    }
+}
+
+class JobCellRenderer : DefaultListCellRenderer() {
+    override fun getListCellRendererComponent(
+        list: JList<*>?, value: Any?, index: Int,
+        isSelected: Boolean, cellHasFocus: Boolean
+    ): Component {
+        val job = value as? GitHubJob
+        val label = super.getListCellRendererComponent(
+            list, job?.name ?: value, index, isSelected, cellHasFocus
+        ) as JLabel
+        label.border = JBUI.Borders.empty(5, 8)
+        
+        label.icon = when {
+            job == null -> AllIcons.RunConfigurations.TestIgnored
+            job.status == "in_progress" || job.status == "waiting" -> AllIcons.RunConfigurations.TestPaused
+            job.status == "queued" -> AllIcons.RunConfigurations.TestNotRan
+            job.conclusion == "success" -> AllIcons.RunConfigurations.TestPassed
+            job.conclusion == "failure" -> AllIcons.RunConfigurations.TestFailed
+            job.conclusion == "cancelled" -> AllIcons.Actions.Cancel
+            job.conclusion == "skipped" -> AllIcons.RunConfigurations.TestSkipped
+            else -> AllIcons.RunConfigurations.TestIgnored
+        }
+        return label
     }
 }
