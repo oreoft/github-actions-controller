@@ -29,6 +29,7 @@ import com.intellij.util.ui.AsyncProcessIcon
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Component
+import java.awt.Cursor
 import java.awt.Font
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -38,6 +39,19 @@ import java.time.format.DateTimeFormatter
 import javax.swing.*
 
 private val rateLimitResetFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
+
+/**
+ * 紧跟在标题文字后面的小刷新图标，故意不放进旁边的工具栏（比如返回按钮），避免离得太近被误触。
+ */
+private fun createInlineIconButton(icon: Icon, tooltip: String, onClick: () -> Unit): JComponent =
+    JLabel(icon).apply {
+        toolTipText = tooltip
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        border = JBUI.Borders.empty(0, 6)
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) = onClick()
+        })
+    }
 
 /**
  * 把异常转成给用户看的本地化错误文案。
@@ -169,23 +183,21 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun buildTitledPane(title: String, list: JBList<*>, onRefresh: (() -> Unit)? = null): JPanel =
         JPanel(BorderLayout()).apply {
-            val titleBar = JPanel(BorderLayout()).apply {
+            val titleBar = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.X_AXIS)
+                isOpaque = false
                 add(JBLabel("  $title").apply {
                     border = JBUI.Borders.empty(5, 6)
                     font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
-                }, BorderLayout.WEST)
+                })
                 if (onRefresh != null) {
-                    val refreshAction = object : AnAction(
-                        message("action.refresh.text"),
-                        message("action.refresh.description"),
-                        AllIcons.Actions.Refresh
-                    ) {
-                        override fun actionPerformed(e: AnActionEvent) = onRefresh()
-                    }
-                    val toolbar = ActionManager.getInstance()
-                        .createActionToolbar("TitledPaneToolbar", DefaultActionGroup(refreshAction), true)
-                    toolbar.targetComponent = list
-                    add(toolbar.component, BorderLayout.EAST)
+                    add(
+                        createInlineIconButton(
+                            AllIcons.Actions.Refresh,
+                            message("action.refresh.description"),
+                            onRefresh
+                        )
+                    )
                 }
             }
             add(titleBar, BorderLayout.NORTH)
@@ -598,24 +610,24 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
                 }
             }
         }
-        val refreshAction = object : AnAction(
-            message("action.refresh.text"),
-            message("action.refresh.description"),
-            AllIcons.Actions.Refresh
-        ) {
-            override fun actionPerformed(e: AnActionEvent) = refresh()
-        }
         val toolbar = ActionManager.getInstance()
-            .createActionToolbar("JobDetailsToolbar", DefaultActionGroup(backAction, refreshAction), true).apply {
+            .createActionToolbar("JobDetailsToolbar", DefaultActionGroup(backAction), true).apply {
                 targetComponent = this@JobDetailsPanel
             }
-        
+
+        val titleWithRefresh = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(headerLabel)
+            add(createInlineIconButton(AllIcons.Actions.Refresh, message("action.refresh.description")) { refresh() })
+        }
+
         val headerPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.customLineBottom(JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground())
             add(toolbar.component, BorderLayout.WEST)
-            
+
             val centerPanel = JPanel(BorderLayout()).apply {
-                add(headerLabel, BorderLayout.WEST)
+                add(titleWithRefresh, BorderLayout.WEST)
                 add(loadingIcon, BorderLayout.EAST)
             }
             add(centerPanel, BorderLayout.CENTER)
