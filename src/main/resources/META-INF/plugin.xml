@@ -38,8 +38,9 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <h3>0.1.0 — Initial Release</h3>
+        <h3>0.1.1 — Marketplace Release</h3>
         <ul>
+            <li>Improve GitHub Enterprise host support and API error reporting</li>
             <li>Browse all GitHub Actions workflows in the Git panel</li>
             <li>View recent runs with status icons (success / failure / in-progress / cancelled…)</li>
             <li>Double-click a run to view Job details and execution logs without leaving the IDE</li>
@@ -52,8 +53,9 @@
 
         <hr/>
 
-        <h3>0.1.0 — 首次发布</h3>
+        <h3>0.1.1 — Marketplace 发布</h3>
         <ul>
+            <li>改进 GitHub Enterprise 主机支持与 API 错误提示</li>
             <li>在 Git 面板中浏览所有 GitHub Actions Workflow</li>
             <li>查看近期运行记录，带状态图标（成功 / 失败 / 进行中 / 已取消…）</li>
             <li>双击运行记录即可在 IDE 内查看 Job 详情与完整执行日志</li>

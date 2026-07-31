@@ -6,3 +6,6 @@ out/
 .intellijPlatform/
 .kotlin/
 .claude/
+.codex/
+.agents/
+.superpowers/

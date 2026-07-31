@@ -4,8 +4,8 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
-group = "com.oreoft"
-version = "0.1.0"
+group = providers.gradleProperty("group").get()
+version = providers.gradleProperty("version").get()
 
 val useLocalIde = providers.gradleProperty("useLocalIde")
     .map(String::toBoolean)
@@ -37,6 +37,6 @@ kotlin {
 
 intellijPlatform {
     publishing {
-        token.set(System.getenv("JB_PUBLISH_TOKEN"))
+        token.set(providers.environmentVariable("JB_PUBLISH_TOKEN"))
     }
 }

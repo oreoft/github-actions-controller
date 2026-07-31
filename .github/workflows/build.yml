@@ -1,9 +1,14 @@
 name: Build
 on:
-  push:
-    branches: [ main, dev ]
   pull_request:
     branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -21,4 +26,4 @@ jobs:
           cache: 'gradle'
 
       - name: Build Plugin
-        run: ./gradlew buildPlugin -PuseLocalIde=false
+        run: ./gradlew verifyPluginProjectConfiguration verifyPluginStructure buildPlugin -PuseLocalIde=false
