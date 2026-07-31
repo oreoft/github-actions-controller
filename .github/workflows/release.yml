@@ -28,6 +28,10 @@ jobs:
         id: properties
         shell: bash
         run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vX.Y.Z." >&2
+            exit 1
+          fi
           VERSION="$(awk -F= '/^[[:space:]]*version[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' gradle.properties)"
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [[ -z "$VERSION" || "$TAG_VERSION" != "$VERSION" ]]; then
