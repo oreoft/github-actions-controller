@@ -34,3 +34,9 @@ dependencies {
 kotlin {
     jvmToolchain(21)
 }
+
+intellijPlatform {
+    publishing {
+        token.set(System.getenv("JB_PUBLISH_TOKEN"))
+    }
+}
