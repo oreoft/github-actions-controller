@@ -7,6 +7,10 @@ plugins {
 group = "com.oreoft"
 version = "0.1.0"
 
+val useLocalIde = providers.gradleProperty("useLocalIde")
+    .map(String::toBoolean)
+    .getOrElse(true)
+
 repositories {
     mavenCentral()
     intellijPlatform {
@@ -17,15 +21,18 @@ repositories {
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     intellijPlatform {
-        // 直接用本机安装的 IDEA，保证沙箱和日常用的版本完全一致
-        local("/Applications/IntelliJ IDEA.app")
+        if (useLocalIde) {
+            local("/Applications/IntelliJ IDEA.app")
+        } else {
+            intellijIdea("2026.1.4")
+        }
         bundledPlugin("Git4Idea")
         bundledPlugin("org.jetbrains.plugins.github")
     }
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
 intellijPlatform {

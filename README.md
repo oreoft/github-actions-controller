@@ -39,6 +39,9 @@ The project is built with Kotlin and the IntelliJ Platform Plugin SDK.
 
 ### Build from source
 
+By default, Gradle uses the IntelliJ IDEA installation at
+`/Applications/IntelliJ IDEA.app` for faster local builds on macOS.
+
 ```bash
 # Compile the Kotlin source code
 ./gradlew compileKotlin
@@ -50,6 +53,16 @@ The project is built with Kotlin and the IntelliJ Platform Plugin SDK.
 ./gradlew runIde
 ```
 
+For Windows, Linux, a different macOS installation path, or a reproducible
+build that downloads IntelliJ IDEA 2026.1.4 from JetBrains repositories, add
+`-PuseLocalIde=false`:
+
+```bash
+./gradlew buildPlugin -PuseLocalIde=false
+```
+
+GitHub Actions always uses the portable mode.
+
 ## 📝 License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](LICENSE).
