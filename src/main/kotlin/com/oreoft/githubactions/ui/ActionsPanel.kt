@@ -148,8 +148,10 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }
             }
         })
-        
-        val runsPane = buildTitledPane(message("panel.runs.title"), runList)
+
+        val runsPane = buildTitledPane(message("panel.runs.title"), runList) {
+            selectedWorkflow?.let { loadRuns(it) }
+        }
         rightCardPanel.add(runsPane, "RunsList")
         rightCardPanel.add(jobDetailsPanel, "JobDetails")
 
@@ -165,12 +167,28 @@ class ActionsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }, BorderLayout.SOUTH)
     }
 
-    private fun buildTitledPane(title: String, list: JBList<*>): JPanel =
+    private fun buildTitledPane(title: String, list: JBList<*>, onRefresh: (() -> Unit)? = null): JPanel =
         JPanel(BorderLayout()).apply {
-            add(JBLabel("  $title").apply {
-                border = JBUI.Borders.empty(5, 6)
-                font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
-            }, BorderLayout.NORTH)
+            val titleBar = JPanel(BorderLayout()).apply {
+                add(JBLabel("  $title").apply {
+                    border = JBUI.Borders.empty(5, 6)
+                    font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
+                }, BorderLayout.WEST)
+                if (onRefresh != null) {
+                    val refreshAction = object : AnAction(
+                        message("action.refresh.text"),
+                        message("action.refresh.description"),
+                        AllIcons.Actions.Refresh
+                    ) {
+                        override fun actionPerformed(e: AnActionEvent) = onRefresh()
+                    }
+                    val toolbar = ActionManager.getInstance()
+                        .createActionToolbar("TitledPaneToolbar", DefaultActionGroup(refreshAction), true)
+                    toolbar.targetComponent = list
+                    add(toolbar.component, BorderLayout.EAST)
+                }
+            }
+            add(titleBar, BorderLayout.NORTH)
             add(JBScrollPane(list), BorderLayout.CENTER)
         }
 
@@ -580,9 +598,17 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
                 }
             }
         }
-        val toolbar = ActionManager.getInstance().createActionToolbar("JobDetailsToolbar", DefaultActionGroup(backAction), true).apply {
-            targetComponent = this@JobDetailsPanel
+        val refreshAction = object : AnAction(
+            message("action.refresh.text"),
+            message("action.refresh.description"),
+            AllIcons.Actions.Refresh
+        ) {
+            override fun actionPerformed(e: AnActionEvent) = refresh()
         }
+        val toolbar = ActionManager.getInstance()
+            .createActionToolbar("JobDetailsToolbar", DefaultActionGroup(backAction, refreshAction), true).apply {
+                targetComponent = this@JobDetailsPanel
+            }
         
         val headerPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.customLineBottom(JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground())
@@ -614,15 +640,22 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
         }
     }
 
-    fun loadJobsForRun(run: GitHubWorkflowRun, ownerRepo: OwnerRepo, account: GithubAccount) {
+    fun loadJobsForRun(
+        run: GitHubWorkflowRun,
+        ownerRepo: OwnerRepo,
+        account: GithubAccount,
+        preserveSelectedJobId: Long? = null
+    ) {
         currentRun = run
         currentOwnerRepo = ownerRepo
         currentAccount = account
-        
+
         headerLabel.text = "#${run.runNumber} [${run.headBranch}]"
-        jobModel.clear()
-        logTextArea.text = message("status.jobs.loading")
-        
+        if (preserveSelectedJobId == null) {
+            jobModel.clear()
+            logTextArea.text = message("status.jobs.loading")
+        }
+
         showLoading()
         AppExecutorUtil.getAppExecutorService().submit {
             val token = GitHubAuthService.getToken(account) ?: run {
@@ -638,9 +671,18 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
                 SwingUtilities.invokeLater {
                     jobModel.clear()
                     jobs.forEach { jobModel.addElement(it) }
-                    logTextArea.text = ""
                     if (jobs.isNotEmpty()) {
-                        jobList.selectedIndex = 0
+                        val targetIndex = preserveSelectedJobId
+                            ?.let { id -> (0 until jobModel.size()).firstOrNull { jobModel.getElementAt(it).id == id } }
+                            ?: 0
+                        if (jobList.selectedIndex == targetIndex) {
+                            // 选中项没变，selection listener 不会触发，需要手动重新加载日志
+                            loadJobLog(jobModel.getElementAt(targetIndex))
+                        } else {
+                            jobList.selectedIndex = targetIndex
+                        }
+                    } else {
+                        logTextArea.text = ""
                     }
                     hideLoading()
                 }
@@ -651,6 +693,13 @@ class JobDetailsPanel : JPanel(BorderLayout()) {
                 }
             }
         }
+    }
+
+    private fun refresh() {
+        val run = currentRun ?: return
+        val ownerRepo = currentOwnerRepo ?: return
+        val account = currentAccount ?: return
+        loadJobsForRun(run, ownerRepo, account, preserveSelectedJobId = jobList.selectedValue?.id)
     }
 
     private fun loadJobLog(job: GitHubJob) {
