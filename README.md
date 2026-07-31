@@ -65,4 +65,4 @@ GitHub Actions always uses the portable mode.
 
 ## 📝 License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](LICENSE).
